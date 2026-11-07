@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetische Testdatei: Personen, Konten und Referenzen sind erfunden. -->
+<Document xmlns="http://www.six-interbank-clearing.com/de/pain.001.001.03.ch.02.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.six-interbank-clearing.com/de/pain.001.001.03.ch.02.xsd pain.001.001.03.ch.02.xsd">
+  <CstmrCdtTrfInitn>
+    <GrpHdr>
+      <MsgId>SYNTH-2026-001</MsgId>
+      <CreDtTm>2026-11-02T08:00:00</CreDtTm>
+      <NbOfTxs>7</NbOfTxs>
+      <CtrlSum>16001.05</CtrlSum>
+      <InitgPty>
+        <Nm>Beispiel Handels AG</Nm>
+        <Id>
+          <OrgId>
+            <BICOrBEI>RAIFCH22</BICOrBEI>
+          </OrgId>
+        </Id>
+        <CtctDtls>
+          <Nm>Altsoftware/Hersteller GmbH</Nm>
+          <Othr>4.2</Othr>
+        </CtctDtls>
+      </InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>GRP-CHF</PmtInfId>
+      <PmtMtd>TRA</PmtMtd>
+      <BtchBookg>true</BtchBookg>
+      <NbOfTxs>3</NbOfTxs>
+      <CtrlSum>1751.05</CtrlSum>
+      <ReqdExctnDt>2026-11-12</ReqdExctnDt>
+      <Dbtr>
+        <Nm>Beispiel Handels AG</Nm>
+        <PstlAdr>
+          <AdrTp>BIZZ</AdrTp>
+          <AdrLine>Industrieweg 8</AdrLine>
+          <AdrLine>CH-6300 Zug</AdrLine>
+        </PstlAdr>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <IBAN>CH9300762011623852957</IBAN>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BIC>RAIFCH22</BIC>
+        </FinInstnId>
+      </DbtrAgt>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>TYP3-IBAN</InstrId>
+          <EndToEndId>E2E-1</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="CHF">1000.00</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Erika Beispiel</Nm>
+          <PstlAdr>
+            <AdrLine>Bahnhofstrasse 12</AdrLine>
+            <AdrLine>CH-8001 Zürich</AdrLine>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>CH5604835012345678009</IBAN>
+          </Id>
+        </CdtrAcct>
+        <RmtInf>
+          <Ustrd>Rechnung 2026-17</Ustrd>
+        </RmtInf>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>TYP3-GLEICHER-EMPF</InstrId>
+          <EndToEndId>E2E-2</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="CHF">500.05</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Erika Beispiel</Nm>
+          <PstlAdr>
+            <AdrLine>Bahnhofstrasse 12</AdrLine>
+            <AdrLine>CH-8001 Zürich</AdrLine>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>CH5604835012345678009</IBAN>
+          </Id>
+        </CdtrAcct>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>TYP3-KONTO-IID</InstrId>
+          <EndToEndId>E2E-3</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="CHF">251.00</InstdAmt>
+        </Amt>
+        <CdtrAgt>
+          <FinInstnId>
+            <ClrSysMmbId>
+              <ClrSysId>
+                <Cd>CHBCC</Cd>
+              </ClrSysId>
+              <MmbId>4835</MmbId>
+            </ClrSysMmbId>
+            <Nm>Beispielbank</Nm>
+          </FinInstnId>
+        </CdtrAgt>
+        <Cdtr>
+          <Nm>Hans Muster</Nm>
+          <PstlAdr>
+            <StrtNm>Dorfstrasse 7a</StrtNm>
+            <PstCd>3000</PstCd>
+            <TwnNm>Bern</TwnNm>
+            <Ctry>CH</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <Othr>
+              <Id>123456</Id>
+            </Othr>
+          </Id>
+        </CdtrAcct>
+      </CdtTrfTxInf>
+    </PmtInf>
+    <PmtInf>
+      <PmtInfId>GRP-USD</PmtInfId>
+      <PmtMtd>TRF</PmtMtd>
+      <ReqdExctnDt>2026-11-12</ReqdExctnDt>
+      <Dbtr>
+        <Nm>Beispiel Handels AG</Nm>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <IBAN>CH9300762011623852957</IBAN>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BIC>RAIFCH22</BIC>
+        </FinInstnId>
+      </DbtrAgt>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>TYP4-FW-INLAND</InstrId>
+          <EndToEndId>E2E-4</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="USD">2000.00</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Sonnen AG</Nm>
+          <PstlAdr>
+            <StrtNm>Seestrasse</StrtNm>
+            <BldgNb>1</BldgNb>
+            <PstCd>6004</PstCd>
+            <TwnNm>Luzern</TwnNm>
+            <Ctry>CH</Ctry>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>CH5604835012345678009</IBAN>
+          </Id>
+        </CdtrAcct>
+      </CdtTrfTxInf>
+      <CdtTrfTxInf>
+        <PmtId>
+          <InstrId>TYP6-AUSLAND</InstrId>
+          <EndToEndId>E2E-5</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="USD">3000.00</InstdAmt>
+        </Amt>
+        <CdtrAgt>
+          <FinInstnId>
+            <BIC>NWBKGB2L</BIC>
+          </FinInstnId>
+        </CdtrAgt>
+        <Cdtr>
+          <Nm>Example Trading Ltd</Nm>
+          <PstlAdr>
+            <AdrLine>10 High Street</AdrLine>
+            <AdrLine>London SW1A 1AA</AdrLine>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>GB29NWBK60161331926819</IBAN>
+          </Id>
+        </CdtrAcct>
+      </CdtTrfTxInf>
+    </PmtInf>
+    <PmtInf>
+      <PmtInfId>GRP-EUR</PmtInfId>
+      <PmtMtd>TRF</PmtMtd>
+      <PmtTpInf>
+        <SvcLvl>
+          <Cd>SEPA</Cd>
+        </SvcLvl>
+      </PmtTpInf>
+      <ReqdExctnDt>2026-10-01</ReqdExctnDt>
+      <Dbtr>
+        <Nm>Beispiel Handels AG</Nm>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <IBAN>CH9300762011623852957</IBAN>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BIC>RAIFCH22</BIC>
+        </FinInstnId>
+      </DbtrAgt>
+      <CdtTrfTxInf>
+        <PmtId>
+          <EndToEndId>E2E-6</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="EUR">4000.00</InstdAmt>
+        </Amt>
+        <CdtrAgt>
+          <FinInstnId>
+            <BIC>COBADEFF</BIC>
+          </FinInstnId>
+        </CdtrAgt>
+        <Cdtr>
+          <Nm>Peter Beispiel</Nm>
+          <PstlAdr>
+            <AdrLine>Rosenauweg 4</AdrLine>
+            <AdrLine>DE-80036 München</AdrLine>
+          </PstlAdr>
+        </Cdtr>
+        <CdtrAcct>
+          <Id>
+            <IBAN>DE89370400440532013000</IBAN>
+          </Id>
+        </CdtrAcct>
+        <RmtInf>
+          <Strd>
+            <CdtrRefInf>
+              <Tp>
+                <CdOrPrtry>
+                  <Cd>SCOR</Cd>
+                </CdOrPrtry>
+              </Tp>
+              <Ref>RF18539007547034</Ref>
+            </CdtrRefInf>
+          </Strd>
+        </RmtInf>
+      </CdtTrfTxInf>
+    </PmtInf>
+    <PmtInf>
+      <PmtInfId>GRP-CHECK</PmtInfId>
+      <PmtMtd>CHK</PmtMtd>
+      <ReqdExctnDt>2026-11-12</ReqdExctnDt>
+      <Dbtr>
+        <Nm>Beispiel Handels AG</Nm>
+      </Dbtr>
+      <DbtrAcct>
+        <Id>
+          <IBAN>CH9300762011623852957</IBAN>
+        </Id>
+      </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <BIC>RAIFCH22</BIC>
+        </FinInstnId>
+      </DbtrAgt>
+      <CdtTrfTxInf>
+        <PmtId>
+          <EndToEndId>E2E-7</EndToEndId>
+        </PmtId>
+        <Amt>
+          <InstdAmt Ccy="CHF">5250.00</InstdAmt>
+        </Amt>
+        <Cdtr>
+          <Nm>Vera Scheck</Nm>
+          <PstlAdr>
+            <StrtNm>Marktgasse</StrtNm>
+            <BldgNb>3</BldgNb>
+            <TwnNm>Basel</TwnNm>
+            <Ctry>CH</Ctry>
+          </PstlAdr>
+        </Cdtr>
+      </CdtTrfTxInf>
+    </PmtInf>
+  </CstmrCdtTrfInitn>
+</Document>
