@@ -1,0 +1,2 @@
+# Testdateien byte-genau auschecken, ohne Zeilenende-Konvertierung (sonst CRLF auf Windows)
+src/test/resources/samples/*.xml -text
