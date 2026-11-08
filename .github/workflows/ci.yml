@@ -21,10 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        java: ['17']
-        include:
-          - os: ubuntu-latest
-            java: '27'
+        # 17 = Mindestversion (maven.compiler.release), latest = neuestes GA-Release
+        java: ['17', 'latest']
     defaults:
       run:
         shell: bash
