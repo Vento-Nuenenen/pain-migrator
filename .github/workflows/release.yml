@@ -1,0 +1,50 @@
+name: Release
+
+# Ablauf: Version in pom.xml anheben, committen, dann
+#   git tag v1.0.1 && git push origin v1.0.1
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Tag mit pom.xml-Version abgleichen
+        run: |
+          POM_VERSION=$(./mvnw -B -q help:evaluate -Dexpression=project.version -DforceStdout)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "pom.xml: $POM_VERSION / Tag: $TAG_VERSION"
+          if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME passt nicht zur Version $POM_VERSION in pom.xml"
+            exit 1
+          fi
+
+      - name: Test & Build
+        run: ./mvnw -B -ntp verify
+
+      - name: Prüfsumme erzeugen
+        working-directory: target
+        run: sha256sum pain-migrator.jar > pain-migrator.jar.sha256
+
+      - name: GitHub Release erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            target/pain-migrator.jar \
+            target/pain-migrator.jar.sha256 \
+            --title "PAIN-Migrator $GITHUB_REF_NAME" \
+            --generate-notes

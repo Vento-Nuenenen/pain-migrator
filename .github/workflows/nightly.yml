@@ -1,0 +1,35 @@
+name: Nightly (erweiterte Tests)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: 'Anzahl generierter Quelldateien (pain.seeds)'
+        default: '5000'
+
+permissions:
+  contents: read
+
+jobs:
+  extended-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Erweiterte Tests
+        run: ./mvnw -B -ntp test -Dpain.seeds=${{ inputs.seeds || '5000' }}
+
+      - name: Testberichte hochladen
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-nightly
+          path: target/surefire-reports/
