@@ -24,7 +24,7 @@ jobs:
         java: ['17']
         include:
           - os: ubuntu-latest
-            java: '21'
+            java: '27'
     defaults:
       run:
         shell: bash
