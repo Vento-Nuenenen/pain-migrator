@@ -4,11 +4,11 @@ import ch.painmigrator.convert.Converter.Result;
 import ch.painmigrator.model.Decision;
 import ch.painmigrator.model.Issue;
 import ch.painmigrator.model.PaymentView;
+import ch.painmigrator.validate.FullComparison;
 import ch.painmigrator.validate.RoundTripCheck;
 import ch.painmigrator.validate.Schemas;
 import ch.painmigrator.xml.Xml;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -18,9 +18,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.xml.sax.SAXException;
 
 /** Eine geöffnete Datei mit den bisherigen Entscheidungen des Benutzers. */
@@ -41,6 +41,12 @@ public final class Session {
             return errors.isEmpty();
         }
     }
+
+    private static final List<String> HEADER_ELEMENTS =
+            List.of("GrpHdr", "GrpHdr/MsgId", "GrpHdr/CreDtTm", "GrpHdr/NbOfTxs", "GrpHdr/InitgPty");
+    private static final List<String> GROUP_ELEMENTS =
+            List.of("PmtInfId", "PmtMtd", "ReqdExctnDt", "Dbtr", "DbtrAcct", "DbtrAgt");
+    private static final List<String> PAYMENT_ELEMENTS = List.of("PmtId/EndToEndId", "Amt");
 
     private final Document source;
     private final List<PaymentView> originals;
@@ -80,6 +86,10 @@ public final class Session {
         if (Views.root(doc) == null) {
             throw new RejectedFile("Die Datei enthält kein Element CstmrCdtTrfInitn.");
         }
+        String missing = missingElement(doc);
+        if (missing != null) {
+            throw new RejectedFile("In der Datei fehlt das Pflichtelement " + missing + ".");
+        }
         try {
             return new Session(doc, Views.read(doc), Schemas.validate(Schemas.SOURCE, data), clock);
         } catch (NumberFormatException e) {
@@ -87,21 +97,33 @@ public final class Session {
         }
     }
 
-    private void refresh() {
-        result = Converter.convert(source, decisions, LocalDateTime.now(clock), sourceErrors, version());
+    /** Ohne diese Elemente ist keine gültige Ausgabe möglich, auch nicht mit Rückfragen. */
+    private static String missingElement(Document doc) {
+        Element root = Views.root(doc);
+        for (String path : HEADER_ELEMENTS) {
+            if (Xml.find(root, path) == null) {
+                return path;
+            }
+        }
+        for (Element group : Xml.children(root, "PmtInf")) {
+            for (String path : GROUP_ELEMENTS) {
+                if (Xml.find(group, path) == null) {
+                    return "PmtInf/" + path;
+                }
+            }
+            for (Element tx : Xml.children(group, "CdtTrfTxInf")) {
+                for (String path : PAYMENT_ELEMENTS) {
+                    if (Xml.find(tx, path) == null) {
+                        return "CdtTrfTxInf/" + path;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
-    private static String version() {
-        try (InputStream in = Session.class.getResourceAsStream("/version.properties")) {
-            Properties p = new Properties();
-            if (in != null) {
-                p.load(in);
-            }
-            String v = p.getProperty("version", "");
-            return v.isEmpty() || v.startsWith("$") ? "dev" : v;
-        } catch (IOException e) {
-            return "dev";
-        }
+    private void refresh() {
+        result = Converter.convert(source, decisions, LocalDateTime.now(clock), sourceErrors);
     }
 
     public Result result() {
@@ -129,9 +151,34 @@ public final class Session {
             decisions.remove(Converter.excludeKey(paymentId));
         }
         refresh();
+        if (!excluded) {
+            undoExclusions(paymentId);
+        }
     }
 
-    /** Bestätigt alle Vorschläge. Spätere Punkte, die dadurch erst sichtbar werden, gehören dazu. */
+    /** Nimmt Ausschlüsse über Rückfragen zurück. Die Rückfrage gilt danach für alle ihre Zahlungen wieder als offen. */
+    private void undoExclusions(String paymentId) {
+        boolean again = true;
+        while (again) {
+            again = false;
+            for (Issue i : result.issues()) {
+                Decision d = i.decision();
+                if (d != null && d.action() == Decision.Action.EXCLUDE && i.payments().contains(paymentId)) {
+                    decisions.remove(i.key());
+                    again = true;
+                }
+            }
+            if (again) {
+                refresh();
+            }
+        }
+    }
+
+    /**
+     * Bestätigt alle Adressvorschläge. Spätere Punkte, die dadurch erst sichtbar werden, gehören dazu.
+     *
+     * <p>Punkte mit {@link Issue.Severity#CONFIRM} bleiben offen, sie brauchen eine einzelne Bestätigung.
+     */
     public int confirmAllProposals() {
         int confirmed = 0;
         boolean again = true;
@@ -166,7 +213,9 @@ public final class Session {
                         excluded.add(p.id());
                     }
                 }
-                errors.addAll(RoundTripCheck.compare(originals, excluded, result.changes(), Xml.parse(xml)));
+                Document written = Xml.parse(xml);
+                errors.addAll(RoundTripCheck.compare(originals, excluded, result.changes(), written));
+                errors.addAll(FullComparison.compare(source, written, excluded, result.log()));
             } catch (SAXException e) {
                 errors.add("Die erzeugte Datei ist nicht lesbar: " + e.getMessage());
             }

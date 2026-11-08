@@ -135,6 +135,19 @@ public final class Xml {
         return cur;
     }
 
+    /** Wie {@link #find}, liefert aber alle Treffer, auch wenn ein Glied mehrfach vorkommt. */
+    public static List<Element> findAll(Element start, String path) {
+        List<Element> current = List.of(start);
+        for (String part : path.split("/")) {
+            List<Element> next = new ArrayList<>();
+            for (Element e : current) {
+                next.addAll(children(e, part));
+            }
+            current = next;
+        }
+        return current;
+    }
+
     public static String text(Element start, String path) {
         Element e = find(start, path);
         return e == null ? null : e.getTextContent().trim();

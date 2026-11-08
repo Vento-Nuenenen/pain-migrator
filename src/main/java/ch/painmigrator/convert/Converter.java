@@ -2,6 +2,7 @@ package ch.painmigrator.convert;
 
 import ch.painmigrator.convert.AddressParser.Parsed;
 import ch.painmigrator.convert.AddressParser.Street;
+import ch.painmigrator.model.ChangeLog;
 import ch.painmigrator.model.Decision;
 import ch.painmigrator.model.Decision.Action;
 import ch.painmigrator.model.Field;
@@ -42,19 +43,23 @@ import org.w3c.dom.Node;
 public final class Converter {
     public static final String NS_OLD = "http://www.six-interbank-clearing.com/de/pain.001.001.03.ch.02.xsd";
     public static final String NS_NEW = "urn:iso:std:iso:20022:tech:xsd:pain.001.001.09";
-    public static final String SPS_VERSION = "0203";
 
     private static final String NS_XSI = "http://www.w3.org/2001/XMLSchema-instance";
     private static final String NS_XMLNS = "http://www.w3.org/2000/xmlns/";
-    private static final Pattern ALLOWED_TEXT = Pattern.compile("[\\x20-\\x7E\\xA0-\\u017F\\u0218-\\u021B\\u20AC]*");
+    private static final Pattern ALLOWED_TEXT = Pattern.compile("[\\x20-\\x7E\\xA0-\\xAC\\xAE-\\u017F\\u0218-\\u021B\\u20AC]*");
     private static final Pattern ALLOWED_ID = Pattern.compile("[A-Za-z0-9 '()+,\\-./:?]*");
     private static final Set<String> LEGACY_LOCAL = Set.of("CH01", "CH02", "CH03");
+    private static final int MAX_MESSAGE = 140;
+    /** Diese Beträge stehen in ch.02 direkt im Element, in ch.03 in einem Unterelement Amt. */
+    private static final Set<String> DOCUMENT_AMOUNTS = Set.of("DscntApldAmt", "TaxAmt");
     private static final Set<String> ID_ELEMENTS = Set.of("MsgId", "PmtInfId", "InstrId", "EndToEndId");
 
     private static final List<String> ADDRESS_ORDER = List.of("Dept", "SubDept", "StrtNm", "BldgNb", "BldgNm", "Flr",
             "PstBx", "Room", "PstCd", "TwnNm", "TwnLctnNm", "DstrctNm", "CtrySubDvsn", "Ctry");
     private static final String[] AFTER_CDTR = {"CdtrAcct", "UltmtCdtr", "InstrForCdtrAgt", "InstrForDbtrAgt", "Purp",
         "RgltryRptg", "Tax", "RltdRmtInf", "RmtInf", "SplmtryData"};
+    private static final String[] AFTER_CHRG_BR = {"ChqInstr", "UltmtDbtr", "IntrmyAgt1", "IntrmyAgt1Acct", "IntrmyAgt2",
+        "IntrmyAgt2Acct", "IntrmyAgt3", "IntrmyAgt3Acct", "CdtrAgt", "CdtrAgtAcct", "Cdtr"};
     private static final String[] AFTER_CDTR_ACCT = {"UltmtCdtr", "InstrForCdtrAgt", "InstrForDbtrAgt", "Purp",
         "RgltryRptg", "Tax", "RltdRmtInf", "RmtInf", "SplmtryData"};
 
@@ -70,7 +75,7 @@ public final class Converter {
 
     /** Ergebnis eines Laufs. */
     public record Result(Document output, List<Issue> issues, List<PaymentView> payments, String msgId,
-            Map<String, BigDecimal> sums, Map<String, Set<String>> changes) {
+            Map<String, BigDecimal> sums, Map<String, Set<String>> changes, ChangeLog log) {
 
         public boolean ready() {
             return activeCount() > 0 && issues.stream().allMatch(Issue::resolved);
@@ -102,26 +107,24 @@ public final class Converter {
     private final Map<String, Decision> decisions;
     private final LocalDateTime now;
     private final List<String> sourceErrors;
-    private final String softwareVersion;
     private final Document out = Xml.newDocument();
     private final Map<String, Issue> issues = new LinkedHashMap<>();
     private final List<PaymentView> views = new ArrayList<>();
     private final Map<String, Set<String>> changes = new HashMap<>();
+    private final ChangeLog log = new ChangeLog();
     private final Set<String> groupIssues = new HashSet<>();
     private String current;
 
-    private Converter(Document source, Map<String, Decision> decisions, LocalDateTime now, List<String> sourceErrors,
-            String softwareVersion) {
+    private Converter(Document source, Map<String, Decision> decisions, LocalDateTime now, List<String> sourceErrors) {
         this.source = source;
         this.decisions = decisions;
         this.now = now;
         this.sourceErrors = sourceErrors;
-        this.softwareVersion = softwareVersion;
     }
 
     public static Result convert(Document source, Map<String, Decision> decisions, LocalDateTime now,
-            List<String> sourceErrors, String softwareVersion) {
-        return new Converter(source, decisions, now, sourceErrors, softwareVersion).run();
+            List<String> sourceErrors) {
+        return new Converter(source, decisions, now, sourceErrors).run();
     }
 
     /** Schlüssel für das Ausschliessen einer einzelnen Zahlung über die Vorschau. */
@@ -131,7 +134,7 @@ public final class Converter {
 
     private Result run() {
         if (!sourceErrors.isEmpty()) {
-            ask("SRC_XSD", Severity.REVIEW, "Quelldatei verletzt das Schema ch.02",
+            ask("SRC_XSD", Severity.CONFIRM, "Quelldatei verletzt das Schema ch.02",
                     "Die Datei entspricht nicht dem offiziellen Schema. Die Umwandlung ist trotzdem möglich, "
                     + "die Ausgabe wird aber streng geprüft.\n\n" + String.join("\n", firstLines(sourceErrors)),
                     List.of(), null, false);
@@ -162,7 +165,7 @@ public final class Converter {
         finishStatus();
         Element grpHdr = Xml.child(initn, "GrpHdr");
         return new Result(out, List.copyOf(issues.values()), List.copyOf(views), Xml.text(grpHdr, "MsgId"),
-                sumsByCurrency(), changes);
+                sumsByCurrency(), changes, log);
     }
 
     private static List<String> firstLines(List<String> lines) {
@@ -185,6 +188,14 @@ public final class Converter {
 
     private Element copy(Element s) {
         String name = s.getLocalName();
+        if (DOCUMENT_AMOUNTS.contains(name) && s.getParentNode() instanceof Element p
+                && "RfrdDocAmt".equals(p.getLocalName())) {
+            Element amount = el("Amt", s.getTextContent().trim());
+            amount.setAttribute("Ccy", s.getAttribute("Ccy"));
+            Element wrapper = el(name, null);
+            wrapper.appendChild(amount);
+            return wrapper;
+        }
         if ("BIC".equals(name) && s.getParentNode() instanceof Element p && "FinInstnId".equals(p.getLocalName())) {
             name = "BICFI";
         } else if ("BICOrBEI".equals(name)) {
@@ -228,6 +239,57 @@ public final class Converter {
         parent.appendChild(child);
     }
 
+    // ---- Änderungsprotokoll ---------------------------------------------------------------------------
+
+    private record Place(String scope, String path) {
+    }
+
+    /** Bereich und Pfad eines Elements im Sinn des Änderungsprotokolls. */
+    private static Place place(Element e) {
+        String path = "";
+        for (Node n = e; n instanceof Element el; n = n.getParentNode()) {
+            if (el.getUserData("id") instanceof String id) {
+                return new Place(id, path);
+            }
+            if (el.getUserData("index") instanceof Integer index) {
+                return new Place(ChangeLog.group(index), path);
+            }
+            if (el.getParentNode() instanceof Document) {
+                return new Place(ChangeLog.HEADER, path);
+            }
+            path = path.isEmpty() ? el.getLocalName() : el.getLocalName() + "/" + path;
+        }
+        throw new IllegalStateException("Element ist nicht Teil der Ausgabe: " + e.getLocalName());
+    }
+
+    private void logRemoved(Element e) {
+        Place p = place(e);
+        ChangeLog.leaves(e, p.path()).forEach(leaf -> log.removed(p.scope(), leaf));
+    }
+
+    private void logAdded(Element e) {
+        Place p = place(e);
+        ChangeLog.leaves(e, p.path()).forEach(leaf -> log.added(p.scope(), leaf));
+    }
+
+    private void drop(Element e) {
+        if (e != null && e.getParentNode() != null) {
+            logRemoved(e);
+            Xml.remove(e);
+        }
+    }
+
+    private void dropAndPrune(Element e) {
+        logRemoved(e);
+        Xml.removeAndPrune(e);
+    }
+
+    private void setText(Element e, String value) {
+        logRemoved(e);
+        e.setTextContent(value);
+        logAdded(e);
+    }
+
     // ---- Rückfragen ------------------------------------------------------------------------------------
 
     private Decision ask(String key, Severity severity, String title, String detail, List<Field> fields, String omit,
@@ -250,6 +312,11 @@ public final class Converter {
         return d;
     }
 
+    /** Verwirft eine Antwort, die das Problem nicht löst. Der Punkt bleibt dadurch offen. */
+    private void reopen(String key) {
+        issues.get(key).decision(null);
+    }
+
     private void info(String key, String title, String detail) {
         ask(key, Severity.INFO, title, detail, List.of(), null, false);
     }
@@ -257,6 +324,17 @@ public final class Converter {
     private void changed(String what) {
         if (current != null) {
             changes.computeIfAbsent(current, k -> new HashSet<>()).add(what);
+        }
+    }
+
+    /** Vermerkt eine Änderung an einem Element. Die PmtInfId gehört zu allen Zahlungen ihrer Gruppe. */
+    private void changedAt(Element e, String what) {
+        if (!"PmtInfId".equals(e.getLocalName())) {
+            changed(what);
+            return;
+        }
+        for (Element tx : Xml.children((Element) e.getParentNode(), "CdtTrfTxInf")) {
+            changes.computeIfAbsent((String) tx.getUserData("id"), k -> new HashSet<>()).add(what);
         }
     }
 
@@ -288,24 +366,34 @@ public final class Converter {
         Xml.child(grpHdr, "CreDtTm").setTextContent(now.truncatedTo(ChronoUnit.SECONDS)
                 .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         Element party = Xml.child(grpHdr, "InitgPty");
+        // CtctDtls ist optional. Die alten Angaben beschreiben die Software, die die alte Datei erzeugt hat,
+        // und passen nicht zur neuen Struktur, deshalb entfallen sie.
         Element contact = Xml.child(party, "CtctDtls");
         if (contact != null) {
-            Xml.remove(contact);
-            info("SOFTWARE", "Software-Angaben ersetzt", "Die Angaben zur Software in InitgPty/CtctDtls beschreiben "
-                    + "nun dieses Programm, weil es die neue Datei erzeugt hat.");
+            drop(contact);
+            info("SOFTWARE", "Software-Angaben entfernt", "Die Angaben in InitgPty/CtctDtls beschreiben die Software, "
+                    + "die die alte Datei erzeugt hat. Sie sind freiwillig und entfallen in der neuen Datei.");
         }
-        contact = el("CtctDtls", null);
-        contact.appendChild(software("NAME", "PAIN-Migrator"));
-        contact.appendChild(software("VRSN", softwareVersion));
-        contact.appendChild(software("SPSV", SPS_VERSION));
-        party.appendChild(contact);
-    }
-
-    private Element software(String channel, String id) {
-        Element othr = el("Othr", null);
-        othr.appendChild(el("ChanlTp", channel));
-        othr.appendChild(el("Id", id));
-        return othr;
+        // SIX verlangt im Auftraggeber mindestens Name oder Identifikation (Fehlercode CH21).
+        // Leere Elemente zählen nicht, sie fallen später weg.
+        Element id = Xml.child(party, "Id");
+        String givenName = Xml.text(party, "Nm");
+        if ((givenName == null || givenName.isEmpty()) && (id == null || id.getTextContent().isBlank())) {
+            Decision d = ask("INITGPTY", Severity.OPEN, "Auftraggeber ohne Name",
+                    "Die Datei nennt den Auftraggeber (InitgPty) weder mit Namen noch mit Identifikation. SIX "
+                    + "verlangt eines davon, sonst lehnt die Bank die Datei ab. Vorgeschlagen ist der Name des "
+                    + "ersten Belastungskontos.",
+                    List.of(Field.text("Nm", "Name", Xml.text(initn, "PmtInf/Dbtr/Nm"), true, 70)), null, false);
+            String name = d == null ? null : d.value("Nm");
+            if (name != null && textProblem("Nm", name) == null) {
+                drop(Xml.child(party, "Nm"));
+                Element nm = el("Nm", name);
+                party.insertBefore(nm, party.getFirstChild());
+                logAdded(nm);
+            } else if (d != null) {
+                reopen("INITGPTY");
+            }
+        }
     }
 
     // ---- Zahlungsgruppe (B-Ebene) ----------------------------------------------------------------------
@@ -313,6 +401,7 @@ public final class Converter {
     private void group(int index, Element group) {
         current = null;
         groupIssues.clear();
+        group.setUserData("index", index, null);
 
         Element method = Xml.child(group, "PmtMtd");
         if ("TRA".equals(Xml.text(method))) {
@@ -331,6 +420,7 @@ public final class Converter {
         Classifier.Group facts = Classifier.Group.of(group);
         Element groupChargeBearer = Xml.child(group, "ChrgBr");
         List<String> ids = new ArrayList<>();
+        List<Element> notSepa = new ArrayList<>();
         BigDecimal sum = BigDecimal.ZERO;
         int count = 0;
         int j = 0;
@@ -351,6 +441,9 @@ public final class Converter {
                 transaction(group, facts, groupChargeBearer, tx, oldType, newType);
                 views.add(Views.of(id, group, tx, oldType, newType[0], PaymentView.Status.OK));
                 ids.add(id);
+                if (!"S".equals(newType[0])) {
+                    notSepa.add(tx);
+                }
                 sum = sum.add(Views.amount(tx));
                 currencies.add(Views.of(id, group, tx, null, null, null).currency());
                 count++;
@@ -363,8 +456,23 @@ public final class Converter {
         for (String key : groupKeys) {
             ids.forEach(issues.get(key)::addPayment);
         }
+        keepChargeBearer(groupChargeBearer, notSepa);
 
         groupLevelCleanup(group, index, count, sum, j, sourceSum, currencies);
+    }
+
+    /** Entfällt die Gebührenregelung der Gruppe wegen SEPA, gilt sie für die übrigen Zahlungen weiter. */
+    private void keepChargeBearer(Element bearer, List<Element> notSepa) {
+        if (bearer == null || bearer.getParentNode() != null) {
+            return;
+        }
+        for (Element tx : notSepa) {
+            if (Xml.child(tx, "ChrgBr") == null) {
+                Element inherited = el("ChrgBr", Xml.text(bearer));
+                insertBefore(tx, inherited, AFTER_CHRG_BR);
+                logAdded(inherited);
+            }
+        }
     }
 
     private void groupLevelCleanup(Element group, int index, int count, BigDecimal sum, int sourceCount,
@@ -383,7 +491,7 @@ public final class Converter {
         boolean nbOff = nb != null && !nb.getTextContent().trim().equals(String.valueOf(sourceCount));
         boolean sumOff = ctrl != null && new BigDecimal(ctrl.getTextContent().trim()).compareTo(sourceSum) != 0;
         if (nbOff || sumOff) {
-            ask("SUM_B|" + index, Severity.REVIEW, "Summe der Gruppe " + id + " stimmt nicht",
+            ask("SUM_B|" + index, Severity.CONFIRM, "Summe der Gruppe " + id + " stimmt nicht",
                     "In der Quelldatei stehen Anzahl " + Xml.text(nb) + " und Summe " + Xml.text(ctrl)
                     + ", nachgerechnet ergibt sich Anzahl " + sourceCount + " und Summe " + sourceSum.toPlainString()
                     + ".\nBestätige nur, wenn die einzelnen Zahlungen korrekt sind.", List.of(), null, false);
@@ -406,22 +514,32 @@ public final class Converter {
         date.setTextContent("");
         Element dt = el("Dt", old);
         date.appendChild(dt);
-        LocalDate parsed;
-        try {
-            parsed = LocalDate.parse(old);
-        } catch (DateTimeParseException e) {
-            parsed = null;
-        }
         LocalDate today = now.toLocalDate();
-        if (parsed == null || parsed.isBefore(today)) {
-            Decision d = ask("DATE|" + old, Severity.OPEN, "Ausführungsdatum " + old + " liegt in der Vergangenheit",
-                    "Lege ein neues Ausführungsdatum fest.",
-                    List.of(Field.of("date", "Neues Datum", today.toString(), true, 10, Field.Type.DATE)), null, false);
-            if (d != null) {
-                String value = d.value("date");
-                dt.setTextContent(value == null ? today.toString() : value);
-                markGroupDateChanged(group);
-            }
+        if (usableDate(old, today)) {
+            return;
+        }
+        String key = "DATE|" + old;
+        Decision d = ask(key, Severity.OPEN, "Ausführungsdatum " + old + " liegt in der Vergangenheit",
+                "Lege ein neues Ausführungsdatum fest.",
+                List.of(Field.date("date", "Neues Datum", today.toString(), today)), null, false);
+        if (d == null) {
+            return;
+        }
+        String value = d.value("date");
+        if (usableDate(value, today)) {
+            setText(dt, value);
+            markGroupDateChanged(group);
+        } else {
+            reopen(key);
+        }
+    }
+
+    private static boolean usableDate(String value, LocalDate today) {
+        try {
+            // xs:date erlaubt eine Zeitzone hinter dem Datum, zum Beispiel 2026-12-01+01:00.
+            return value != null && !LocalDate.parse(value.substring(0, Math.min(10, value.length()))).isBefore(today);
+        } catch (DateTimeParseException e) {
+            return false;
         }
     }
 
@@ -435,11 +553,18 @@ public final class Converter {
         if (iban == null || (Checksums.isValidIban(iban) && !Checksums.isQrIban(iban))) {
             return;
         }
-        Decision d = ask("DBTRACCT|" + iban, Severity.OPEN, "Belastungskonto " + iban + " ist ungültig",
+        String key = "DBTRACCT|" + iban;
+        Decision d = ask(key, Severity.OPEN, "Belastungskonto " + iban + " ist ungültig",
                 "Die IBAN des Belastungskontos ist fehlerhaft oder eine QR-IBAN. Eine QR-IBAN ist hier nicht erlaubt.",
-                List.of(Field.of("iban", "IBAN Belastungskonto", iban, true, 34, Field.Type.IBAN)), null, false);
-        if (d != null && d.value("iban") != null) {
-            ibanEl.setTextContent(Checksums.normalize(d.value("iban")));
+                List.of(Field.of("iban", "IBAN Belastungskonto", iban, true, 34, Field.Type.DEBTOR_IBAN)), null, false);
+        if (d == null) {
+            return;
+        }
+        String fixed = d.value("iban");
+        if (fixed != null && Checksums.isValidIban(fixed) && !Checksums.isQrIban(fixed)) {
+            setText(ibanEl, Checksums.normalize(fixed));
+        } else {
+            reopen(key);
         }
     }
 
@@ -460,6 +585,7 @@ public final class Converter {
 
         if (accountKnown) {
             newType[0] = Classifier.newType(tx, facts);
+            sepaCurrency(tx, newType[0]);
             agent(tx, newType[0]);
             reference(tx, newType[0]);
             forbidden(tx, newType[0]);
@@ -498,21 +624,26 @@ public final class Converter {
             acct.insertBefore(id, acct.getFirstChild());
         }
         for (Element e : Xml.children(id)) {
-            Xml.remove(e);
+            drop(e);
         }
-        id.appendChild(el("IBAN", Checksums.normalize(iban)));
+        Element ibanEl = el("IBAN", Checksums.normalize(iban));
+        id.appendChild(ibanEl);
+        logAdded(ibanEl);
         changed("account");
     }
 
     /** Liefert true, wenn das Empfängerkonto nun feststeht. */
     private boolean account(Element tx, String oldType, String account) {
         String iban = Xml.text(tx, "CdtrAcct/Id/IBAN");
-        String shown = account == null ? "(ohne Konto)" : account;
+        // Ohne Konto gibt es nichts, das zwei Zahlungen verbindet: jede bekommt ihre eigene Rückfrage.
+        String shown = account == null ? "(ohne Konto, Empfänger " + Xml.text(tx, "Cdtr/Nm") + ")" : account;
+        // Dieselbe Nummer bei einem anderen Empfänger kann ein anderes Konto sein, die IBAN darf nicht mitwandern.
+        String key = account == null ? "ohne Konto|" + current : account + "|" + Xml.text(tx, "Cdtr/Nm");
         switch (oldType) {
             case "8":
                 return true;
             case "1": {
-                Decision d = ask("ACCT1|" + shown, Severity.OPEN, "ESR-Zahlung an " + shown,
+                Decision d = ask("ACCT1|" + key, Severity.OPEN, "ESR-Zahlung an " + shown,
                         "Der ESR wurde am 30.09.2022 eingestellt. Die ESR-Teilnehmernummer lässt sich nicht in eine "
                         + "QR-IBAN umrechnen. Trage die QR-IBAN aus der aktuellen QR-Rechnung ein.\n"
                         + "Die bisherige Referenz wird als QR-Referenz übernommen. Prüfe sie gegen die Rechnung.",
@@ -522,12 +653,12 @@ public final class Converter {
             case "2.1":
             case "2.2":
                 if (iban == null) {
-                    Decision d = ask("ACCT2|" + shown, Severity.OPEN, "ES-Zahlung an Konto " + shown,
+                    Decision d = ask("ACCT2|" + key, Severity.OPEN, "ES-Zahlung an Konto " + shown,
                             "Der ES wurde am 30.09.2022 eingestellt. Trage die IBAN des Empfängers ein.",
                             List.of(Field.of("iban", "IBAN", null, true, 34, Field.Type.IBAN)), null, true);
                     return applyIban(tx, d);
                 }
-                ask("LEGACY|" + iban, Severity.REVIEW, "ES-Zahlung an " + iban + " wird normale Zahlung",
+                ask("LEGACY|" + iban, Severity.CONFIRM, "ES-Zahlung an " + iban + " wird normale Zahlung",
                         "Die Zahlung war ein zweistufiger ES (CH03). Sie wird ohne diese Kennzeichnung übernommen.",
                         List.of(), null, true);
                 break;
@@ -548,7 +679,7 @@ public final class Converter {
         if (agentGiven && account != null) {
             return true;
         }
-        Decision d = ask("ACCT|" + shown, Severity.OPEN, "Konto " + shown + " ohne IBAN",
+        Decision d = ask("ACCT|" + key, Severity.OPEN, "Konto " + shown + " ohne IBAN",
                 "Ein Konto ohne IBAN ist nur zusammen mit einem IID oder BIC möglich. Trage die IBAN ein.",
                 List.of(Field.of("iban", "IBAN", null, true, 34, Field.Type.IBAN)), null, true);
         return applyIban(tx, d);
@@ -562,6 +693,16 @@ public final class Converter {
         return true;
     }
 
+    private void sepaCurrency(Element tx, String type) {
+        String currency = Classifier.currency(tx);
+        if ("S".equals(type) && !"EUR".equals(currency)) {
+            ask("SEPA_CCY|" + currency, Severity.CONFIRM, "SEPA-Zahlung in " + currency,
+                    "SEPA-Zahlungen sind nur in EUR möglich. Die Zahlung wird unverändert übernommen, die Bank wird sie "
+                    + "voraussichtlich ablehnen. Korrigiere sie im Ursprungssystem oder schliesse sie aus.",
+                    List.of(), null, true);
+        }
+    }
+
     private void agent(Element tx, String type) {
         Element fi = Xml.find(tx, "CdtrAgt/FinInstnId");
         if (fi == null) {
@@ -573,7 +714,7 @@ public final class Converter {
             for (String name : List.of("Nm", "PstlAdr")) {
                 Element e = Xml.child(fi, name);
                 if (e != null) {
-                    Xml.remove(e);
+                    drop(e);
                     removed = true;
                 }
             }
@@ -584,15 +725,15 @@ public final class Converter {
         }
         Element clearing = Xml.child(fi, "ClrSysMmbId");
         if (clearing != null && "S".equals(type)) {
-            Xml.remove(clearing);
+            drop(clearing);
             info("AGENT_IID", "IID der Empfängerbank entfernt", "Bei SEPA-Zahlungen ist der IID nicht erlaubt.");
         } else if (clearing != null && bic) {
-            Decision d = ask("AGENT_BOTH|" + Xml.text(fi, "BICFI") + "|" + Xml.text(clearing, "MmbId"), Severity.REVIEW,
+            Decision d = ask("AGENT_BOTH|" + Xml.text(fi, "BICFI") + "|" + Xml.text(clearing, "MmbId"), Severity.CONFIRM,
                     "BIC und IID gleichzeitig angegeben", "BICFI und ClrSysMmbId dürfen nicht zusammen vorkommen. "
                     + "Der BIC " + Xml.text(fi, "BICFI") + " bleibt, der IID " + Xml.text(clearing, "MmbId")
                     + " wird entfernt.", List.of(), null, true);
             if (d != null) {
-                Xml.remove(clearing);
+                drop(clearing);
             }
         }
         if (Xml.children(fi).isEmpty()) {
@@ -609,7 +750,7 @@ public final class Converter {
             if (qr) {
                 Decision d = ask("REFMISSING|" + iban, Severity.OPEN, "QR-Referenz fehlt für " + iban,
                         "Zu einer QR-IBAN gehört zwingend eine QR-Referenz.",
-                        List.of(Field.text("ref", "QR-Referenz", null, true, 27)), null, true);
+                        List.of(Field.of("ref", "QR-Referenz", null, true, 35, Field.Type.QR_REFERENCE)), null, true);
                 if (d != null && d.value("ref") != null) {
                     setReference(tx, d.value("ref"));
                     changed("reference");
@@ -650,17 +791,33 @@ public final class Converter {
         if (problem == null) {
             return;
         }
-        Decision d = ask("REF|" + ref + "|" + qr, Severity.OPEN, "Referenz " + ref + " ist nicht verwendbar", problem,
-                List.of(Field.text("ref", "Referenz", ref, true, 35)), qr ? null : "Als Mitteilung übernehmen", true);
+        String existing = Xml.text(tx, "RmtInf/Ustrd");
+        String message = existing == null ? ref : existing + " " + ref;
+        boolean asMessage = !qr && message.length() <= MAX_MESSAGE;
+        String key = "REF|" + ref + "|" + qr;
+        Decision d = ask(key, Severity.OPEN, "Referenz " + ref + " ist nicht verwendbar", problem,
+                List.of(Field.of("ref", qr ? "QR-Referenz" : "ISO-Referenz", ref, true, 35,
+                        qr ? Field.Type.QR_REFERENCE : Field.Type.CREDITOR_REFERENCE)),
+                asMessage ? "Als Mitteilung übernehmen" : null, true);
         if (d == null) {
             return;
         }
         if (d.action() == Action.OMIT) {
-            moveReferenceToMessage(tx, info, ref);
-        } else if (d.value("ref") != null && !d.value("ref").equals(ref)) {
-            setReference(tx, d.value("ref"));
+            if (asMessage) {
+                moveReferenceToMessage(tx, info, message);
+            } else {
+                reopen(key);
+            }
+            return;
+        }
+        // Nur eine gültige Referenz löst den Punkt. Das beendet auch die Rekursion.
+        String fixed = d.value("ref");
+        if (fixed != null && (qr ? Checksums.isValidQrReference(fixed) : Checksums.isValidCreditorReference(fixed))) {
+            setReference(tx, fixed);
             changed("reference");
             reference(tx, type);
+        } else {
+            reopen(key);
         }
     }
 
@@ -681,44 +838,54 @@ public final class Converter {
             insertBefore(strd, info, "Invcr", "Invcee", "TaxRmt", "GrnshmtRmt", "AddtlRmtInf");
         }
         for (Element e : Xml.children(info)) {
-            Xml.remove(e);
+            drop(e);
         }
-        info.appendChild(el("Ref", Checksums.normalize(ref)));
+        Element refEl = el("Ref", Checksums.normalize(ref));
+        info.appendChild(refEl);
+        logAdded(refEl);
     }
 
     private void setReferenceType(Element info, String code, String proprietary) {
-        Xml.remove(Xml.child(info, "Tp"));
+        drop(Xml.child(info, "Tp"));
         Element tp = el("Tp", null);
         Element choice = el("CdOrPrtry", null);
         choice.appendChild(code != null ? el("Cd", code) : el("Prtry", proprietary));
         tp.appendChild(choice);
         info.insertBefore(tp, info.getFirstChild());
+        logAdded(tp);
     }
 
-    private void moveReferenceToMessage(Element tx, Element info, String ref) {
+    private void moveReferenceToMessage(Element tx, Element info, String message) {
         Element rmt = Xml.child(tx, "RmtInf");
-        Xml.removeAndPrune(info);
+        dropAndPrune(info);
         if (rmt.getParentNode() == null) {
             rmt = el("RmtInf", null);
             insertBefore(tx, rmt, "SplmtryData");
         }
-        if (Xml.child(rmt, "Ustrd") == null) {
-            rmt.insertBefore(el("Ustrd", ref), rmt.getFirstChild());
+        Element text = Xml.child(rmt, "Ustrd");
+        if (text == null) {
+            text = el("Ustrd", message);
+            rmt.insertBefore(text, rmt.getFirstChild());
+            logAdded(text);
+        } else {
+            setText(text, message);
         }
+        changed("reference");
     }
 
     private void forbidden(Element tx, String type) {
         for (String path : FORBIDDEN.getOrDefault(type, List.of())) {
-            Element e = Xml.find(tx, path);
-            if (e == null) {
-                continue;
-            }
-            String value = e.getTextContent().trim();
-            Decision d = ask("DROP|" + type + "|" + path + "|" + value, Severity.REVIEW,
-                    path + " bei Zahlungsart " + type + " nicht erlaubt",
-                    "Das Element wird entfernt. Bisheriger Inhalt: " + shorten(value), List.of(), null, true);
-            if (d != null) {
-                Xml.removeAndPrune(e);
+            for (Element e : Xml.findAll(tx, path)) {
+                String value = e.getTextContent().trim();
+                Decision d = ask("DROP|" + type + "|" + path + "|" + value, Severity.CONFIRM,
+                        path + " bei Zahlungsart " + type + " nicht erlaubt",
+                        "Das Element wird entfernt. Bisheriger Inhalt: " + shorten(value), List.of(), null, true);
+                if (d != null) {
+                    dropAndPrune(e);
+                    if ("CdtrAcct".equals(path)) {
+                        changed("account");
+                    }
+                }
             }
         }
     }
@@ -730,10 +897,10 @@ public final class Converter {
         for (Element bearer : new Element[] {Xml.child(tx, "ChrgBr"), groupBearer}) {
             String value = Xml.text(bearer);
             if ("DEBT".equals(value) || "CRED".equals(value)) {
-                Decision d = ask("CHRGBR|" + value, Severity.REVIEW, "Gebührenregelung " + value + " bei SEPA nicht erlaubt",
+                Decision d = ask("CHRGBR|" + value, Severity.CONFIRM, "Gebührenregelung " + value + " bei SEPA nicht erlaubt",
                         "Bei SEPA sind nur SLEV und SHAR erlaubt. Das Element wird entfernt.", List.of(), null, true);
                 if (d != null) {
-                    Xml.remove(bearer);
+                    drop(bearer);
                 }
             }
         }
@@ -744,11 +911,11 @@ public final class Converter {
         Element text = Xml.find(tx, "RmtInf/Ustrd");
         if (iban != null && Checksums.isQrIban(iban) && text != null) {
             String value = Xml.text(text);
-            Decision d = ask("QRTEXT|" + value, Severity.REVIEW, "Mitteilung neben QR-IBAN nicht erlaubt",
+            Decision d = ask("QRTEXT|" + value, Severity.CONFIRM, "Mitteilung neben QR-IBAN nicht erlaubt",
                     "Zu einer QR-IBAN darf kein Ustrd geliefert werden. Der Text wird entfernt: " + shorten(value),
                     List.of(), null, true);
             if (d != null) {
-                Xml.remove(text);
+                drop(text);
             }
         }
     }
@@ -762,7 +929,8 @@ public final class Converter {
         boolean cheque = "C".equals(type);
         String iban = Xml.text(tx, "CdtrAcct/Id/IBAN");
         String fallback = iban != null && iban.length() >= 2 ? iban.substring(0, 2) : null;
-        String extra = Xml.child(cdtr, "Nm") == null ? String.valueOf(sourceAccount) : "";
+        // Gleicher Name auf anderem Konto kann eine andere Person sein. Ohne Konto gibt es nichts Verbindendes.
+        String extra = sourceAccount != null ? sourceAccount : current;
         address(cdtr, "Empfänger", true, true, !cheque, cheque, fallback, extra);
     }
 
@@ -831,7 +999,8 @@ public final class Converter {
         proposal.values().removeIf(v -> v == null || v.isBlank());
 
         boolean sure = leftovers.isEmpty() && name != null && proposal.containsKey("TwnNm") && proposal.containsKey("Ctry")
-                && (lines.isEmpty() || parsed.confident()) && !(needPostCode && !proposal.containsKey("PstCd"));
+                && (lines.isEmpty() ? known.containsKey("Ctry") : parsed.confident())
+                && !(needPostCode && !proposal.containsKey("PstCd"));
         String raw = String.join(" / ", lines);
         String structured = String.join(" ", known.values());
         String was = (raw + " " + structured).trim();
@@ -859,7 +1028,7 @@ public final class Converter {
             return;
         }
         if (d.action() == Action.OMIT) {
-            Xml.remove(adr);
+            drop(adr);
             if (name == null) {
                 setName(party, d);
             }
@@ -878,7 +1047,23 @@ public final class Converter {
         }
         setName(party, d);
         finalValues.remove("Nm");
-        writeAddress(party, finalValues);
+        rewriteAddress(party, finalValues, finalValues.equals(proposal));
+    }
+
+    /** Ein unveränderter Vorschlag teilt nur neu auf. Geänderte Werte sind Benutzereingaben. */
+    private void rewriteAddress(Element party, Map<String, String> values, boolean asProposed) {
+        Element old = Xml.child(party, "PstlAdr");
+        if (asProposed) {
+            Place p = place(party);
+            log.rewritten(p.scope(), p.path().isEmpty() ? "PstlAdr" : p.path() + "/PstlAdr");
+            writeAddress(party, values);
+            return;
+        }
+        if (old != null) {
+            logRemoved(old);
+        }
+        writeAddress(party, values);
+        logAdded(Xml.child(party, "PstlAdr"));
     }
 
     /** Hält Werte aus AdrLine fest, die wegen eines vorhandenen strukturierten Felds keinen Platz fanden. */
@@ -891,7 +1076,9 @@ public final class Converter {
     private void setName(Element party, Decision d) {
         String value = d.value("Nm");
         if (value != null && Xml.child(party, "Nm") == null) {
-            party.insertBefore(el("Nm", value), party.getFirstChild());
+            Element entered = el("Nm", value);
+            party.insertBefore(entered, party.getFirstChild());
+            logAdded(entered);
             changed("creditor");
         }
     }
@@ -922,7 +1109,7 @@ public final class Converter {
         boolean nbOff = !Xml.text(nb).equals(String.valueOf(sourceCount));
         boolean sumOff = ctrl != null && new BigDecimal(Xml.text(ctrl)).compareTo(sourceSum) != 0;
         if (nbOff || sumOff) {
-            ask("SUM_A", Severity.REVIEW, "Kontrollsumme der Datei stimmt nicht", "Im Kopf stehen Anzahl " + Xml.text(nb)
+            ask("SUM_A", Severity.CONFIRM, "Kontrollsumme der Datei stimmt nicht", "Im Kopf stehen Anzahl " + Xml.text(nb)
                     + " und Summe " + Xml.text(ctrl) + ", nachgerechnet ergibt sich Anzahl " + sourceCount + " und Summe "
                     + sourceSum.toPlainString() + ".\nBestätige nur, wenn die einzelnen Zahlungen korrekt sind.",
                     List.of(), null, false);
@@ -970,11 +1157,11 @@ public final class Converter {
                 target = (Element) e.getParentNode().getParentNode();
             }
             String value = target.getTextContent().trim();
-            Decision d = ask("PATH|" + path + "|" + value, Severity.REVIEW, "Element ohne Entsprechung: " + path,
+            Decision d = ask("PATH|" + path + "|" + value, Severity.CONFIRM, "Element ohne Entsprechung: " + path,
                     "Das Zielformat kennt dieses Element nicht, es würde beim Speichern entfernt.\nInhalt: " + shorten(value),
                     List.of(), null, false);
             if (d != null) {
-                Xml.removeAndPrune(target);
+                dropAndPrune(target);
             }
         }
         current = null;
@@ -1000,32 +1187,43 @@ public final class Converter {
         }
         String value = e.getTextContent();
         String name = e.getLocalName();
-        String problem = null;
-        if (value.isBlank()) {
-            problem = "Leere Elemente sind nicht erlaubt.";
-        } else if (!ALLOWED_TEXT.matcher(value).matches()) {
-            problem = "Der Text enthält Zeichen, die laut SPS nicht erlaubt sind.";
-        } else if (ID_ELEMENTS.contains(name) && !validId(value)) {
-            problem = "In Referenzfeldern sind nur A-Z, a-z, 0-9, Leerzeichen und ' ( ) + , - . / : ? erlaubt. "
-                    + "Sie dürfen nicht mit Leerzeichen oder / beginnen, nicht mit / enden und kein // enthalten.";
-        }
+        String problem = textProblem(name, value);
         if (problem == null) {
             return;
         }
         forPayment(e);
         String path = Xml.path(e).replace("/Document/CstmrCdtTrfInitn/", "");
-        Decision d = ask("TXT|" + path + "|" + value, Severity.OPEN, "Ungültiger Inhalt in " + name, problem + "\nPfad: " + path,
+        String key = "TXT|" + path + "|" + value;
+        Decision d = ask(key, Severity.OPEN, "Ungültiger Inhalt in " + name, problem + "\nPfad: " + path,
                 List.of(Field.text("value", name, value, false, 2048)), null, false);
         if (d != null) {
             String fixed = d.value("value");
-            if (fixed == null) {
-                Xml.removeAndPrune(e);
+            if (fixed != null && textProblem(name, fixed) != null) {
+                reopen(key);
             } else {
-                e.setTextContent(fixed);
+                changedAt(e, comparedField(name, path));
+                if (fixed == null) {
+                    dropAndPrune(e);
+                } else {
+                    setText(e, fixed);
+                }
             }
-            changed(comparedField(name, path));
         }
         current = null;
+    }
+
+    private static String textProblem(String name, String value) {
+        if (value.isBlank()) {
+            return "Leere Elemente sind nicht erlaubt.";
+        }
+        if (!ALLOWED_TEXT.matcher(value).matches()) {
+            return "Der Text enthält Zeichen, die laut SPS nicht erlaubt sind.";
+        }
+        if (ID_ELEMENTS.contains(name) && !validId(value)) {
+            return "In Referenzfeldern sind nur A-Z, a-z, 0-9, Leerzeichen und ' ( ) + , - . / : ? erlaubt. "
+                    + "Sie dürfen nicht mit Leerzeichen oder / beginnen, nicht mit / enden und kein // enthalten.";
+        }
+        return null;
     }
 
     /** Ordnet ein korrigiertes Element dem Feld zu, das der Vergleich alt gegen neu prüft. */
@@ -1049,32 +1247,36 @@ public final class Converter {
 
     private void checkDuplicates(Element initn) {
         Set<String> groups = new HashSet<>();
-        int i = 0;
         for (Element group : Xml.children(initn, "PmtInf")) {
-            i++;
             Element id = Xml.child(group, "PmtInfId");
             if (!groups.add(Xml.text(id))) {
-                fixDuplicate("DUPB|" + i, id, "PmtInfId", "Die PmtInfId muss in der Datei eindeutig sein.");
+                fixDuplicate("DUPB|" + group.getUserData("index"), id, "Die PmtInfId muss in der Datei eindeutig sein.",
+                        groups);
             }
             Set<String> instructions = new HashSet<>();
-            int j = 0;
             for (Element tx : Xml.children(group, "CdtTrfTxInf")) {
-                j++;
                 Element instr = Xml.find(tx, "PmtId/InstrId");
                 if (instr != null && !instructions.add(Xml.text(instr))) {
-                    fixDuplicate("DUPC|" + i + "." + j, instr, "InstrId", "Die InstrId muss in der Gruppe eindeutig sein.");
+                    fixDuplicate("DUPC|" + tx.getUserData("id"), instr, "Die InstrId muss in der Gruppe eindeutig sein.",
+                            instructions);
                 }
             }
         }
     }
 
-    private void fixDuplicate(String key, Element e, String label, String detail) {
+    private void fixDuplicate(String key, Element e, String detail, Set<String> used) {
         forPayment(e);
+        String label = e.getLocalName();
         Decision d = ask(key, Severity.OPEN, label + " " + Xml.text(e) + " ist doppelt", detail,
                 List.of(Field.text("value", label, Xml.text(e), true, 35)), null, false);
-        if (d != null && d.value("value") != null) {
-            e.setTextContent(d.value("value"));
-            changed("id");
+        if (d != null) {
+            String fixed = d.value("value");
+            if (fixed != null && validId(fixed) && used.add(fixed)) {
+                setText(e, fixed);
+                changedAt(e, "id");
+            } else {
+                reopen(key);
+            }
         }
         current = null;
     }

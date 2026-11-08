@@ -52,7 +52,7 @@ public final class MainWindow extends JFrame {
     private static final Color EXCLUDED_BG = new Color(0xE3E3E3);
 
     private final JLabel summary = new JLabel("Keine Datei geöffnet. Datei hierher ziehen oder «Öffnen» wählen.");
-    private final JButton confirmAll = new JButton("Alle Vorschläge bestätigen");
+    private final JButton confirmAll = new JButton("Alle Adressvorschläge bestätigen");
     private final JButton save = new JButton("Speichern …");
     private final PaymentTableModel tableModel = new PaymentTableModel(this::setExcluded);
     private final DefaultListModel<Issue> issueModel = new DefaultListModel<>();
@@ -139,7 +139,8 @@ public final class MainWindow extends JFrame {
                 Issue i = (Issue) value;
                 String mark = i.severity() == Issue.Severity.INFO ? "Info"
                         : i.resolved() ? "Erledigt"
-                        : i.severity() == Issue.Severity.OPEN ? "Eingabe nötig" : "Vorschlag prüfen";
+                        : i.severity() == Issue.Severity.OPEN ? "Eingabe nötig"
+                        : i.severity() == Issue.Severity.CONFIRM ? "Bestätigung nötig" : "Vorschlag prüfen";
                 int n = i.payments().size();
                 String text = "[" + mark + "]  " + i.title() + (n > 1 ? "  (" + n + " Zahlungen)" : "");
                 Component c = super.getListCellRendererComponent(list, text, index, selected, focus);
@@ -159,6 +160,9 @@ public final class MainWindow extends JFrame {
         });
         JButton edit = new JButton("Bearbeiten …");
         edit.addActionListener(e -> editSelected());
+        // Ohne gewählte Zeile gibt es nichts zu bearbeiten, also ist der Button gesperrt.
+        edit.setEnabled(false);
+        issueList.addListSelectionListener(e -> edit.setEnabled(issueList.getSelectedValue() != null));
         JPanel head = new JPanel(new BorderLayout());
         head.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
         head.add(new JLabel("Rückfragen und Hinweise (Doppelklick zum Bearbeiten)"), BorderLayout.WEST);
@@ -214,7 +218,7 @@ public final class MainWindow extends JFrame {
     private void confirmAll() {
         int n = session.confirmAllProposals();
         update();
-        JOptionPane.showMessageDialog(this, n + " Vorschläge bestätigt.", "Vorschläge", JOptionPane.INFORMATION_MESSAGE);
+        JOptionPane.showMessageDialog(this, n + " Adressvorschläge bestätigt.", "Vorschläge", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void editSelected() {

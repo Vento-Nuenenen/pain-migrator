@@ -16,8 +16,10 @@ public final class Issue {
     public enum Severity {
         /** Eine Eingabe ist zwingend nötig. */
         OPEN,
-        /** Es gibt einen Vorschlag, der bestätigt werden muss. */
+        /** Es gibt einen Vorschlag, der auch gesammelt bestätigt werden darf. */
         REVIEW,
+        /** Muss einzeln bestätigt werden, etwa weil Daten entfallen oder die Quelle fehlerhaft ist. */
+        CONFIRM,
         /** Reine Information, keine Aktion nötig. */
         INFO
     }

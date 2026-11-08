@@ -50,6 +50,11 @@ public final class AddressParser {
     private AddressParser() {
     }
 
+    /** Ein ausgeschriebener Ländername. Er geht beim Zerlegen in das Feld Ctry über. */
+    public static boolean isCountryName(String text) {
+        return COUNTRY_NAMES.containsKey(text.toLowerCase(Locale.ROOT));
+    }
+
     /** Trennt Strassenname und Hausnummer. Liefert null, wenn keine Hausnummer erkennbar ist. */
     public static Street splitStreet(String street) {
         if (street == null) {

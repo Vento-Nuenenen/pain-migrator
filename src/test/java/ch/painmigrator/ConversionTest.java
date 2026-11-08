@@ -169,8 +169,7 @@ class ConversionTest {
         assertEquals("7", Xml.text(header, "NbOfTxs"));
         assertEquals(0, new BigDecimal("16001.05").compareTo(new BigDecimal(Xml.text(header, "CtrlSum"))));
         assertEquals("RAIFCH22", Xml.text(header, "InitgPty/Id/OrgId/AnyBIC"));
-        assertEquals("NAME", Xml.text(header, "InitgPty/CtctDtls/Othr/ChanlTp"));
-        assertNull(Xml.find(header, "InitgPty/CtctDtls/Nm"));
+        assertNull(Xml.find(header, "InitgPty/CtctDtls"));
 
         Element first = Xml.child(root, "PmtInf");
         assertEquals("TRF", Xml.text(first, "PmtMtd"));
@@ -351,7 +350,7 @@ class ConversionTest {
         Session s = open(modified("<CtrlSum>16001.05</CtrlSum>", "<CtrlSum>16001.15</CtrlSum>"));
         Issue sum = issue(s, "SUM_A");
         assertNotNull(sum);
-        assertEquals(Issue.Severity.REVIEW, sum.severity());
+        assertEquals(Issue.Severity.CONFIRM, sum.severity());
         assertFalse(sum.resolved());
     }
 

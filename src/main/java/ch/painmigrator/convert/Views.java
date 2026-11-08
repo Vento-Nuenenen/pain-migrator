@@ -37,7 +37,7 @@ public final class Views {
         return new PaymentView(id, Xml.text(group, "PmtInfId"), Xml.text(tx, "PmtId/EndToEndId"),
                 Xml.text(tx, "PmtId/InstrId"), oldType, newType, Xml.text(tx, "Cdtr/Nm"),
                 address(Xml.find(tx, "Cdtr/PstlAdr")), account(tx), amount(tx),
-                currency(tx, amount), executionDate(group), reference(tx), status);
+                amount == null ? "" : amount.getAttribute("Ccy"), executionDate(group), reference(tx), status);
     }
 
     private static Element amountElement(Element tx) {
@@ -46,17 +46,9 @@ public final class Views {
     }
 
     /** Betrag der Zahlung. Massgebend für Kontrollsummen laut SPS: Instructed oder Equivalent Amount. */
-    static BigDecimal amount(Element tx) {
+    public static BigDecimal amount(Element tx) {
         Element a = amountElement(tx);
         return a == null ? BigDecimal.ZERO : new BigDecimal(a.getTextContent().trim());
-    }
-
-    private static String currency(Element tx, Element amount) {
-        if (amount == null) {
-            return "";
-        }
-        return "InstdAmt".equals(amount.getLocalName()) ? amount.getAttribute("Ccy")
-                : Xml.text(tx, "Amt/EqvtAmt/CcyOfTrf");
     }
 
     private static String account(Element tx) {

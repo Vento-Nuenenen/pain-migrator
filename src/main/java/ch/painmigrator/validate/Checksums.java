@@ -45,8 +45,7 @@ public final class Checksums {
         if (!isValidIban(s) || !(s.startsWith("CH") || s.startsWith("LI"))) {
             return false;
         }
-        int iid = Integer.parseInt(s.substring(4, 9));
-        return iid >= 30000 && iid <= 31999;
+        return s.substring(4, 9).matches("3[01][0-9]{3}");
     }
 
     /** QR-Referenz: 27 Ziffern, letzte Stelle ist die Prüfziffer nach Modulo 10 rekursiv. */

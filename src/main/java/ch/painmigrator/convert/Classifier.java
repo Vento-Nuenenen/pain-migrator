@@ -49,7 +49,7 @@ final class Classifier {
         return iban != null ? iban.length() >= 2 && isChLi(iban.substring(0, 2)) : domesticAgent(tx);
     }
 
-    private static String currency(Element tx) {
+    static String currency(Element tx) {
         Element instructed = Xml.find(tx, "Amt/InstdAmt");
         return instructed != null ? instructed.getAttribute("Ccy") : Xml.text(tx, "Amt/EqvtAmt/CcyOfTrf");
     }
