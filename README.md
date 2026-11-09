@@ -99,3 +99,8 @@ Das fertige Programm liegt danach unter `target/pain-migrator.jar`. Es hat keine
 - [SIX Download Center](https://www.six-group.com/en/products-services/banking-services/payment-standardization/downloads-faq/download-center.html)
 - [Implementation Guidelines Credit Transfer SPS 2026](https://www.six-group.com/dam/download/banking-services/standardization/sps/ig-credit-transfer-sps-2026-en.pdf)
 - [Merkblatt Adressen und Meldungsversionen](https://www.six-group.com/dam/download/banking-services/standardization/sps/factsheet-address-messageversion-erp-de.pdf)
+
+## Lizenz
+
+Pain Migrator steht unter der [MIT-Lizenz](LICENSE).
+
